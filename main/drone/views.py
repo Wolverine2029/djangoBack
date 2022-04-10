@@ -1,5 +1,6 @@
 import datetime
 
+from django.http import HttpResponse
 from django.shortcuts import render, redirect
 from .models import RegisteredUsers, UnRegisteredUsers, tickets
 # Create your views here.
@@ -9,6 +10,8 @@ import logging
 logger = logging.getLogger(__name__)
 import cv2
 import glob
+import smtplib, ssl
+from email.message import EmailMessage
 
 
 # firebase = firebase.FirebaseApplication("https://eyeconic-c6280-default-rtdb.firebaseio.com/", None)
@@ -20,16 +23,16 @@ import glob
 # result = firebase.post("/eyeconic-c6280-default-rtdb/UnegisteredUsers", data)
 # print(result)
 
-import firebase_admin as fa
-from firebase_admin import credentials
-from firebase_admin import firestore
-cred = credentials.Certificate("/Users/anilkumar/Downloads/eyeconic/main/drone/firebasekey.json")
-fa.initialize_app(cred)
+# import firebase_admin as fa
+# from firebase_admin import credentials
+# from firebase_admin import firestore
+# cred = credentials.Certificate("/Users/anilkumar/Downloads/eyeconic/main/drone/firebasekey.json")
+# fa.initialize_app(cred)
 
 data = {'name': 'Sunny', 'email': 'munnacinqstar@gmail.com', 'license' : 'SUN123'}
 # db.collection('UnregUsers').add(data)
 
-def Users_List(request, license):
+def Users_List(license):
     # logger.info('Requested users list ' + str(datetime.datetime.now()) + ' hours!')
     #
     # db = firestore.client()
@@ -52,9 +55,9 @@ def Users_List(request, license):
     # unreg = firebase.get('/eyeconic-c6280-default-rtdb/UnegisteredUsers', '')
     # print(unreg)
 
-    i, n = checkImage()
-    print("Fianl image: ", i)
-    print("Fianl plate number: ", n)
+    # i, n = checkImage()
+    # print("Fianl image: ", i)
+    # print("Fianl plate number: ", n)
     users = RegisteredUsers.objects.all()
     unReg = UnRegisteredUsers.objects.all()
     issueTicket = True
@@ -86,21 +89,69 @@ def Users_List(request, license):
     }
     print(checklicense)
     img = 'YBP75307'
-    return render(request, 'drone/list.html' ,context)
+    return checklicense
 
-def issueTicket(request):
-    licenseNum = request.POST.get("license")
+def issueTicket(request, license):
+    licenseNum = license
+    issued = ''
     ticks = tickets.objects.all()
     for i in ticks:
         if i == licenseNum:
-            message = "Ticket Already Issued."
-    new_ticket = tickets(license=request.POST.get('license'))
-    new_ticket.save()
-    context = {
-        'message': "Issued Ticket Successfully",
-    }
+            issued = 'no'
+        else:
+            new_ticket = tickets(license=request.POST.get('license'))
+            new_ticket.save()
+            print("Issued ticket Successfully")
+            issued = 'yes'
+            break
+    print("Issuing complete")
     logger.warning('Issuing Ticket to : ' + str(licenseNum))
-    return render(request, 'drone/list.html' ,context)
+    return HttpResponse(issued)
+
+def email_service(license):
+    unReg = UnRegisteredUsers.objects.all()
+    sentStatus = ''
+    ln = license
+    port = 465  # For SSL
+    smtp_server = "smtp.gmail.com"
+    sender_email = "munnacinqstar@gmail.com"  # Enter your address
+    receiver_email = ''  # Enter receiver address
+    message = EmailMessage()
+    message['Subject'] = 'Issued Ticket to car - ' + str(ln) + ' at UMKC parking area.'
+    message['From'] = 'anilkumarkochera@gmail.com'
+    message['To'] = 'akkw32@umsystem.edu'
+    for unreg in unReg:
+        logger.info('Entered unregistered users loop')
+        if unreg.license == ln:
+            logger.info('Entered unregistered users loop IF condition')
+            receiver_email = str(unreg.email)
+            message['To'] = str(unreg.email)
+            print("Sending ticket email to: ", receiver_email)
+    # Create the plain-text and HTML version of your message
+    text = """\
+    Hi,
+    Due to your unauthorized parking at UMKC campus, Ticket has been issued to your automobile."""
+    html = """\
+    <html>
+      <body>
+        <p>Hi,<br>
+           Acknowledge this mail by paying your ticket.<br>
+        </p>
+      </body>
+    </html>
+
+    """
+
+    context = ssl.create_default_context()
+    try:
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, 'Smartass@2025')
+            server.sendmail(sender_email, receiver_email, message)
+            sentStatus = 'yes'
+    except Exception as e:
+        print("An error occured while sending email", e)
+        sentStatus = 'no'
+    return HttpResponse(sentStatus)
 
 def checkImage():
 
@@ -138,41 +189,18 @@ def checkImage():
             print("Data found in output.txt")
             with open('/Users/anilkumar/Downloads/eyeconic/main/drone/images/output.txt') as f:
                 lines = f.readlines()[-1]
-                print("New License Plate Number:", lines)
                 number = lines
-                print(lines, "   gggg")
+                print("License Platae Number: ", lines)
             waitFlag = False
 
-    img = '/Users/anilkumar/Downloads/eyeconic/main/drone/images/'+ str(number) + '.jpg'
-    image = cv2.imread(img)
-    print(type(image))
-    return lines, image
+    # img = '/Users/anilkumar/Downloads/eyeconic/main/drone/images/'+ str(number) + '.jpg'
+    # image = cv2.imread(img)
+    # print(type(image))
+    user_status = Users_List(lines)
+    emailstatus = email_service(lines)
+    return HttpResponse({'userValidation': user_status, 'license': lines, 'email': emailstatus})
     # import glob
     # import os
     # list_of_files = glob.glob('/Users/anilkumar/Downloads/eyeconic/main/drone/images/*.jpg')  # * means all if need specific format then *.csv
     # latest_file = max(list_of_files, key=os.path.getctime)
     # print(latest_file)
-
-
-def check_user(request):
-    if 'license' in request.POST:
-        pass
-    # do somethings
-    users = RegisteredUsers.objects.all()
-    context = {
-        'users': users,
-    }
-
-    return render(request, context)
-
-
-def create_user(request):
-    return render(request, 'drone/create.html', context)
-
-
-def delete_user(request, pk):
-    return render(request, 'drone/delete.html', context)
-
-
-def edit_user(request, pk):
-    return render(request, 'drone/update.html', context)
